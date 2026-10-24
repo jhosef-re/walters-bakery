@@ -1,0 +1,152 @@
+# =============================================================================
+# Walters Bakery — docker-compose
+# =============================================================================
+# Perfiles disponibles:
+#   default                     -> solo postgres (desarrollo local con npm)
+#   with-redis                  -> postgres + redis (BullMQ para CU-16)
+#   full                        -> postgres + redis + backend + frontend
+#   backend / frontend          -> individuales
+#
+# Uso tipico:
+#   docker compose up -d                    # solo Postgres
+#   docker compose --profile full up -d --build
+#   docker compose --profile backend logs -f
+# =============================================================================
+
+name: walters-bakery
+
+services:
+  # ---------------------------------------------------------------------------
+  # Postgres - persistente, expuesto en 5433 del host para no chocar con otros
+  # proyectos que ya usan 5432.
+  # ---------------------------------------------------------------------------
+  postgres:
+    image: postgres:16-alpine
+    container_name: walters-bakery-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: walters_bakery
+    ports:
+      - '5433:5432'
+    volumes:
+      - walters-bakery_postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - pg_isready -U postgres -d walters_bakery
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    networks:
+      - walters-bakery-net
+
+  # ---------------------------------------------------------------------------
+  # Redis - necesario para BullMQ (jobs de vencimiento CU-16).
+  # Solo se levanta con perfiles que lo requieren.
+  # ---------------------------------------------------------------------------
+  redis:
+    profiles: ['with-redis', 'full', 'backend']
+    image: redis:7-alpine
+    container_name: walters-bakery-redis
+    restart: unless-stopped
+    command: ['redis-server', '--appendonly', 'yes']
+    ports:
+      - '6379:6379'
+    volumes:
+      - walters-bakery_redis_data:/data
+    healthcheck:
+      test: ['CMD', 'redis-cli', 'ping']
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - walters-bakery-net
+
+  # ---------------------------------------------------------------------------
+  # Backend - NestJS API
+  # ---------------------------------------------------------------------------
+  backend:
+    profiles: ['backend', 'full']
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    container_name: walters-bakery-backend
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment:
+      NODE_ENV: production
+      PORT: 3000
+      # Dentro de la red Docker el hostname del servicio es 'postgres'
+      DATABASE_URL: postgresql://postgres:postgres@postgres:5432/walters_bakery?schema=public
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      JWT_ACCESS_SECRET: ${JWT_ACCESS_SECRET:-replace-me-access}
+      JWT_ACCESS_TTL: ${JWT_ACCESS_TTL:-15m}
+      JWT_REFRESH_SECRET: ${JWT_REFRESH_SECRET:-replace-me-refresh}
+      JWT_REFRESH_TTL: ${JWT_REFRESH_TTL:-7d}
+      CORS_ORIGIN: ${CORS_ORIGIN:-http://localhost:8080,http://localhost:5173}
+      SMTP_HOST: ${SMTP_HOST:-mailhog}
+      SMTP_PORT: ${SMTP_PORT:-1025}
+      SMTP_USER: ${SMTP_USER:-}
+      SMTP_PASS: ${SMTP_PASS:-}
+      SMTP_FROM: ${SMTP_FROM:-Walters Bakery <no-reply@walters.local>}
+      JOB_VENCIMIENTO_OFFSET_MINUTOS: ${JOB_VENCIMIENTO_OFFSET_MINUTOS:-60}
+      JOB_VENCIMIENTO_TICK_CRON: ${JOB_VENCIMIENTO_TICK_CRON:-*/5 * * * *}
+    ports:
+      - '3000:3000'
+    networks:
+      - walters-bakery-net
+
+  # ---------------------------------------------------------------------------
+  # Frontend - Vite build estatico servido por nginx
+  # ---------------------------------------------------------------------------
+  frontend:
+    profiles: ['frontend', 'full']
+    build:
+      context: .
+      dockerfile: frontend/Dockerfile
+      args:
+        VITE_API_URL: ${VITE_API_URL:-http://localhost:3000/api}
+    container_name: walters-bakery-frontend
+    restart: unless-stopped
+    depends_on:
+      - backend
+    ports:
+      - '8080:80'
+    networks:
+      - walters-bakery-net
+
+  # ---------------------------------------------------------------------------
+  # MailHog - SMTP de desarrollo (captura correos localmente)
+  # Solo se levanta con el perfil 'full' (o 'mail').
+  # ---------------------------------------------------------------------------
+  mailhog:
+    profiles: ['full', 'mail']
+    image: mailhog/mailhog:latest
+    container_name: walters-bakery-mailhog
+    restart: unless-stopped
+    ports:
+      - '1025:1025'
+      - '8025:8025'
+    networks:
+      - walters-bakery-net
+
+# =============================================================================
+# Redes y volumenes nombrados (persisten entre `down` y `up`).
+# =============================================================================
+networks:
+  walters-bakery-net:
+    name: walters-bakery-net
+
+volumes:
+  walters-bakery_postgres_data:
+    name: walters-bakery_postgres_data
+  walters-bakery_redis_data:
+    name: walters-bakery_redis_data

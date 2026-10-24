@@ -1,0 +1,15 @@
+node_modules
+dist
+coverage
+*.log
+.git
+.gitignore
+.env
+.env.*
+!.env.example
+.DS_Store
+.idea
+.vscode
+test
+*.tsbuildinfo
+prisma/migrations/**/migration_lock.toml.bak

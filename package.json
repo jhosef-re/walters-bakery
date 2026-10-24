@@ -1,0 +1,23 @@
+{
+  "name": "walters-bakery",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Sistema de control de inventario, producción, mermas y cierres de venta para panadería multi-sucursal.",
+  "workspaces": [
+    "backend",
+    "frontend"
+  ],
+  "scripts": {
+    "dev": "npm run dev --workspaces --if-present",
+    "dev:backend": "npm run start:dev --workspace backend",
+    "dev:frontend": "npm run dev --workspace frontend",
+    "build": "npm run build --workspaces --if-present",
+    "lint": "npm run lint --workspaces --if-present",
+    "test": "npm run test --workspaces --if-present",
+    "prisma:generate": "npm run prisma:generate --workspace backend",
+    "prisma:migrate": "npm run prisma:migrate --workspace backend"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}
